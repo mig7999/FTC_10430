@@ -11,9 +11,10 @@ import com.qualcomm.robotcore.util.*;
 import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.util.Range;
 import com.qualcomm.robotcore.util.ElapsedTime;
+
+import static org.swerverobotics.library.internal.Util.handleCapturedInterrupt;
+
 /**
- * SynchIMUDemo gives a short demo on how to use the BNO055 Inertial Motion Unit (IMU) from AdaFruit.
- * http://www.adafruit.com/products/2472
  */
 @TeleOp(name="WW_RED_Alliance", group="Swerve Examples")
 
@@ -28,14 +29,10 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
     ElapsedTime             elapsed    = new ElapsedTime();
     IBNO055IMU.Parameters   parameters = new IBNO055IMU.Parameters();
 
-    // Here we have state we use for updating the dashboard. The first of these is important
-    // to read only once per update, as its acquisition is expensive. The remainder, though,
-    // could probably be read once per item, at only a small loss in display accuracy.
     EulerAngles angles;
     Position position;
     Velocity velocity;
-    //DcMotor motorRight;
-    //DcMotor motorLeft;
+
     DcMotor frontleft = null;
     DcMotor backleft = null;
     DcMotor frontright  = null;
@@ -66,12 +63,13 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
     double                  ms;
     double msCopy = 0;
     int ServoMotionState = 0;
-    double TempMaxdrivePower = 0.07;
-    double NormalMaxdrivePower = 0.12;
-    double maxdrivePower = 0.12;
 
+    double TempMaxdrivePower = 0.07;
+    double NormalMaxdrivePower = 0.13;
+    double maxdrivePower = 0.13;
     double TargetHeading = 0.0;
-    double TurningSpeed = 0.10;
+    double TurningSpeed = 0.115;
+
     Boolean MaxDrivePowerAchieved = false;
     double HeadingShiftValue = 1000.0;
     double TimeElapsed= 0;
@@ -104,7 +102,7 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
         MOVE_FWD_TWD_BEACONS,// move slowly use ods C
         TURN_LEFT_2ND_TIME_TWRDS_BEACONS,// 45 more degrees. D
         MOVE_FWD_APPROACH_BEACONS,// move slowly use ods E
-        TURN_LEFT_SWEEP_BEACON, //F
+        TURN_LEFT_FOR_BEACON_SWEEP, //F
         MOVE_SWEEP_BEACONS,//G
         DRIVE_BACK_TO_MIDPT,//H
         TURN_RIGHT_FACE_BEACON_MIDPT,//H
@@ -132,27 +130,25 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
     {
         // We are expecting the IMU to be attached to an I2C port on  a core device interface
 
-        waitOneFullHardwareCycle();
+        int SubState = 0;
+        double LeftEdge = 0;
+        double RightEdge = 0;
         frontright = hardwareMap.dcMotor.get("frontright");
-        waitOneFullHardwareCycle();
         backright = hardwareMap.dcMotor.get("backright");
-        waitOneFullHardwareCycle();
         frontleft = hardwareMap.dcMotor.get("frontleft");
-        waitOneFullHardwareCycle();
         backleft = hardwareMap.dcMotor.get("backleft");
-        waitOneFullHardwareCycle();
+
+        frontright.setDirection(DcMotor.Direction.REVERSE);
+        backright.setDirection(DcMotor.Direction.REVERSE);
+
         s1 = this.hardwareMap.servo.get("servo1");
         s2 = this.hardwareMap.servo.get("servo2");
         s3 = this.hardwareMap.servo.get("servo3");
         s4 = this.hardwareMap.servo.get("servo4");
         s5 = this.hardwareMap.servo.get("servo5");
-        waitOneFullHardwareCycle();
-        Reset_Encoders();
 
-        // One of the two motors (here, the left) should be set to reversed direction
-        // so that it can take the same power level values as the other motor.
-        frontright.setDirection(DcMotor.Direction.REVERSE);
-        backright.setDirection(DcMotor.Direction.REVERSE);
+
+        Reset_Encoders();
 
 
 
@@ -161,41 +157,43 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
         parameters.loggingEnabled = false;
         parameters.loggingTag     = ",BNO055";
         imu = ClassFactory.createAdaFruitBNO055IMU(hardwareMap.i2cDevice.get("imu"), parameters);
-        waitOneFullHardwareCycle();
+
 
         v_sensor_ods = hardwareMap.opticalDistanceSensor.get ("sensor_ods");
         v_sensor_ods_SIDE = hardwareMap.opticalDistanceSensor.get ("sensor_ods_side");
 
 
 
-        double LeftEdge = 0.0;
-        double RightEdge = 0.0;
 
         Targetdistance = 15.0;
-        int SubState = 0;
+
         // Wait until we're told to go
         CurrentState = States.APROACH_CENTERLINE;
+        delay(50);
         imu.startAccelerationIntegration(new Position(), new Velocity());
+        delay(50);
         angles = imu.getAngularOrientation();
         InitialPitchValue = normalizeDegrees(angles.heading);
 
         // Set up our dashboard computations
         composeDashboard();
+
+        idle();
+
         boolean IsIMUDisc = IsIMUDisconnected();
 
         if (IsIMUDisc == false)
         {   waitForStart();
+            delay(50);
+            IsIMUDisc = IsIMUDisconnected();
             // Enable reporting of position using the naive integrator
 
             RobotShouldBeInMotion = true;
 
-
-
-
             //THIS IS OUR MAIN LOOP!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            while (opModeIsActive())
+            while (opModeIsActive() && (IsIMUDisc == false))
             {
-
+                idle();
                 angles = imu.getAngularOrientation();
                 NormalizedHeading = NormalizePitchReading(normalizeDegrees(angles.heading), InitialPitchValue) ;
                 X_Position_Inches = convert_encoder_dat_to_inches((backleft.getCurrentPosition() + backright.getCurrentPosition()) / 2);
@@ -203,9 +201,8 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
                 Front_ods_Distance = get_ods_value_in_inches();
 
                 telemetry.update();
-                idle();
 
-/*
+
                 if (OneStepAtAttime) // use gamepad1 as a way to step through
                 {
                     SetServoPositions();
@@ -216,9 +213,12 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
                     }
 
                 }
-*/
-
-               // else
+                else if (Rest_Positions_Enabled) // only handle the initial Set_Rest_Servo_Positions
+                {
+                    Set_Rest_Servo_Positions();
+                    SetServoPositions();
+                }
+                else
                 {
 
                     SetServoPositions();
@@ -237,6 +237,7 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
                                     RobotShouldBeInMotion = true;
                                     TargetHeading = -45.0;//
                                     OneStepAtAttime = true;
+                                    Reset_Encoders();
                                 }
 
                             }
@@ -254,7 +255,7 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
                                 if (DidRoboStoppedtMoving()) {
                                     CurrentState = States.MOVE_FWD_TWD_BEACONS;
                                     RobotShouldBeInMotion = true;
-                                    Targetdistance = 50.0;//66 made it shorted to come in ahead of sweep
+                                    Targetdistance = 55.0;//66 made it shorted to come in ahead of sweep
                                     Reset_Encoders();
                                     OneStepAtAttime = true;
                                 }
@@ -299,7 +300,7 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
                                     OneStepAtAttime = true;
                                     //TempMaxdrivePower = 0.075;
                                     //NormalMaxdrivePower = 0.1;
-                                    maxdrivePower = TempMaxdrivePower;
+
 
                                 }
 
@@ -310,14 +311,26 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
                             if (RobotShouldBeInMotion) {
                                 goStraightKeepStraight(Targetdistance);
                                 // don't allow it to get too close to the beacons. || (get_ods_value_in_inches() < 2.0)
-                                if ((X_Position_Inches >= Targetdistance)|| (Front_ods_Distance < 5.0))
+                                if ((X_Position_Inches >= Targetdistance)|| (Front_ods_Distance <= 5.5))
                                 {
                                     stopRobot();
                                     RobotShouldBeInMotion = false;
                                 }
+
+                                if ((X_Position_Inches >= 3.0)&&(DidRoboStoppedtMoving()))// if front sensor gets blind
+                                {
+                                    stopRobot();
+                                    RobotShouldBeInMotion = false;
+                                }
+
+                                if (X_Position_Inches >= 3.0)// drop speed after intial approach
+                                {
+                                    maxdrivePower = TempMaxdrivePower;
+                                }
+
                             } else {
                                 if (DidRoboStoppedtMoving()) {
-                                    CurrentState = States.TURN_LEFT_SWEEP_BEACON;
+                                    CurrentState = States.TURN_LEFT_FOR_BEACON_SWEEP;
                                     RobotShouldBeInMotion = true;
                                     Reset_Encoders();
                                     OneStepAtAttime = true;
@@ -327,11 +340,12 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
                             }
                             break;
 
-                        case TURN_LEFT_SWEEP_BEACON: //F.1
+                        case TURN_LEFT_FOR_BEACON_SWEEP: //F.1
                             if (RobotShouldBeInMotion) {
                                 // going from -90 to 180 left turn. We just need to switch signs
                                 // then stop right away
-                                if (NormalizedHeading >= 0.0) {
+                                if ((NormalizedHeading >= 0.0) ||(NormalizedHeading <= -175.0 ))
+                                {
                                     stopRobot();
                                     RobotShouldBeInMotion = false;
                                 } else {
@@ -341,7 +355,7 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
                                 if (DidRoboStoppedtMoving()) {
                                     CurrentState = States.MOVE_SWEEP_BEACONS;
                                     RobotShouldBeInMotion = true;
-                                    Targetdistance = 20.0;
+                                    Targetdistance = 30.0;
                                     Reset_Encoders();
                                     OneStepAtAttime = true;
                                 }
@@ -354,21 +368,23 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
 
                                 goStraightKeepStraight(Targetdistance);
 
-                                //double Side_ods_Dist_inch = (get_ods_side_value_in_inches()*0.90)+(LastSideRangeSensorVal*0.1);
+                                LastSideRangeSensorVal = (Side_ods_Distance*0.95)+(LastSideRangeSensorVal*0.05);
                                 //LastSideRangeSensorVal = Side_ods_Dist_inch;
 
-                                if ((RightEdge == 0.0) && (Side_ods_Distance< 6.0))
+                                if ((RightEdge == 0) && (LastSideRangeSensorVal < 5.0))
                                 {
                                     RightEdge = X_Position_Inches;
+                                    TurningPowercopy = 6.0;
                                 }
-                                if ((RightEdge != 0.0) &&(LeftEdge == 0.0) && (Side_ods_Distance > 6.0))
+                                if ((RightEdge != 0) &&(LeftEdge == 0) && (LastSideRangeSensorVal > 5.0))
                                 {
                                     LeftEdge = X_Position_Inches;
-                                    stopRobot();
-                                    RobotShouldBeInMotion = false;
+                                    //stopRobot();
+                                    //RobotShouldBeInMotion = false;
+                                    TurningPowercopy = 9.0;
 
                                 }
-                                if (X_Position_Inches >= Targetdistance)
+                                if ((X_Position_Inches >= Targetdistance)|| ( (LeftEdge != 0) && ((X_Position_Inches-LeftEdge) >= 3.0)))
                                 {
                                     stopRobot();
                                     RobotShouldBeInMotion = false;
@@ -377,17 +393,18 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
                             }
                             else {
                                 if (DidRoboStoppedtMoving()) {
-                                    CurrentState = States.DRIVE_BACK_TO_MIDPT;
+                                    CurrentState = States.TURN_RIGHT_FACE_BEACON_MIDPT;
                                     RobotShouldBeInMotion = true;
                                     Reset_Encoders();
                                     OneStepAtAttime = true;
-                                    Targetdistance = LeftEdge-RightEdge;//
+                                    TargetHeading = -90.0;
+                                    //Targetdistance = (LeftEdge-RightEdge)/2.0;//
                                 }
 
                             }
                             break;
                         //DriveBackwards
-                        case DRIVE_BACK_TO_MIDPT: //G
+/*                        case DRIVE_BACK_TO_MIDPT: //G
                             if (RobotShouldBeInMotion) {
                                 DriveBackwards(-Targetdistance);// Targetdistance is
                                 if (X_Position_Inches <= (-Targetdistance)) {
@@ -404,7 +421,7 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
                                 }
 
                             }
-                            break;
+                            break;*/
 
                         case TURN_RIGHT_FACE_BEACON_MIDPT: //H
                             //we are going from 180 to -90. We want negative numbers
@@ -488,9 +505,9 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
 
                             }
                             break;
-                        case TURN_RIGHT_TWRDS_RAMP: //L We really just need to stop at the sign change.
+                        case TURN_RIGHT_TWRDS_RAMP: //L 90 to 135. We really just need to stop at the sign change.
                             if (RobotShouldBeInMotion) {
-                                if (NormalizedHeading <= TargetHeading) {
+                                if (NormalizedHeading >= TargetHeading) {
                                     stopRobot();
                                     RobotShouldBeInMotion = false;
                                 } else {
@@ -543,7 +560,7 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
                                     RobotShouldBeInMotion = true;
                                     Reset_Encoders();
                                     OneStepAtAttime = true;
-                                    Targetdistance = 30.0;
+                                    Targetdistance = 40.0;
                                 }
 
                             }
@@ -597,11 +614,11 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
             if (MaxDrivePowerAchieved == false)// startup power
             {
 
-                AdjusteddrivePower = 0.070+(Math.pow(X_Position_Inches+2,3))/5000.0;
+                AdjusteddrivePower = 0.065+(Math.pow(X_Position_Inches+2,3))/5000.0;
             }
             else// slow down power as we approach target position
             {
-                AdjusteddrivePower = 0.065+(Math.pow(Distancedifference+1,3))/5000.0;
+                AdjusteddrivePower = 0.055+(Math.pow(Distancedifference+1,2))/5000.0;
             }
 
             if (AdjusteddrivePower > maxdrivePower)
@@ -632,11 +649,17 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
             //HeadingShiftValue shifts the number calculations away from zero to avoid division by zero.
             if (TargetHeading == 180.0)
             {
-                if (NormalizedHeading > 0.0)// if heading is around 180
+                if (NormalizedHeading >= 0.0)// if heading is around 180
                 {
                     NormalizedHeading = 180.0-(NormalizedHeading-180.0);
+                    HeadingError = (((NormalizedHeading+HeadingShiftValue)-(TargetHeading+HeadingShiftValue))/(TargetHeading+HeadingShiftValue))*(5.0);
                 }
-                HeadingError = (((NormalizedHeading+HeadingShiftValue)-(TargetHeading+HeadingShiftValue))/(TargetHeading+HeadingShiftValue))*5.0;
+                else// NormalizedHeading is less than zero
+                {
+                    HeadingError = (((NormalizedHeading+HeadingShiftValue)-(TargetHeading+HeadingShiftValue))/(TargetHeading+HeadingShiftValue))*(5.0);
+                }
+
+
             }
             else
             {
@@ -645,18 +668,17 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
 
             if ( HeadingError > 0.0)// we are skewed to the right. apply more power to that side.
             {
+                if ( HeadingError > 1.0) HeadingError = 1.0;
                 NewRightMotorPower = AdjusteddrivePower*(1.0+HeadingError);
                 NewLeftMotorPower = AdjusteddrivePower*(1.0-HeadingError);
             }
 
             else if ( HeadingError <= 0.0)// we are skewed to the left. apply more power to that side.
             {
+                if ( HeadingError < -1.0) HeadingError = -1.0;
                 NewRightMotorPower = AdjusteddrivePower*(1.0+HeadingError);
                 NewLeftMotorPower = AdjusteddrivePower*(1.0-HeadingError);
             }
-
-            //motorLeft.setPower(NewLeftMotorPower);
-            //motorRight.setPower(NewRightMotorPower);
 
             frontright.setPower(NewRightMotorPower);
             backright.setPower(NewRightMotorPower);
@@ -679,11 +701,11 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
             if (MaxDrivePowerAchieved == false)// startup power
             {
 
-                AdjusteddrivePower = 0.065+(Math.pow(-X_Position_Inches+1,3))/5000.0;
+                AdjusteddrivePower = 0.045+(Math.pow(-X_Position_Inches+1,3))/5000.0;
             }
             else// slow down power as we approach target position
             {
-                AdjusteddrivePower = 0.065+(Math.pow(Distancedifference+1,3))/5000.0;
+                AdjusteddrivePower = 0.045+(Math.pow(Distancedifference+1,3))/5000.0;
             }
 
             if (AdjusteddrivePower > maxdrivePower)
@@ -693,14 +715,16 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
             }
 
             //HeadingShiftValue shifts the number calculations away from zero to avoid division by zero.
-            HeadingError = (((NormalizedHeading+HeadingShiftValue)-(TargetHeading+HeadingShiftValue))/(TargetHeading+HeadingShiftValue))*5.0;
+            HeadingError = (((NormalizedHeading+HeadingShiftValue)-(TargetHeading+HeadingShiftValue))/(TargetHeading+HeadingShiftValue))*(-5.0);
             if ( HeadingError > 0.0)// we are skewed to the right. apply more power to that side.
             {
+                if ( HeadingError > 1.0) HeadingError = 1.0;
                 NewRightMotorPower = AdjusteddrivePower*(1.0-HeadingError);
                 NewLeftMotorPower = AdjusteddrivePower*(1.0+HeadingError);
             }
             else if ( HeadingError <= 0.0)// we are skewed to the left. apply more power to that side.
             {
+                if ( HeadingError < -1.0) HeadingError = -1.0;
                 NewRightMotorPower = AdjusteddrivePower*(1.0-HeadingError);
                 NewLeftMotorPower = AdjusteddrivePower*(1.0+HeadingError);
             }
@@ -740,18 +764,31 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
     }
     double SlowTurning()
     {
-        double AdjustedTurningSpeed = 0.0;
-        double AngularDifference = 0.0;
+        double AdjustedTurningSpeed;
+        double AngularDifference;
         AngularDifference = Math.abs((NormalizedHeading+200)-(TargetHeading+200));
         if (MaxDrivePowerAchieved == false)// startup power
         {
             AdjustedTurningSpeed = TurningSpeed;
         }
         else {
-            AdjustedTurningSpeed = 0.02+((Math.pow((AngularDifference+1),2))/10000.0);
+            if (TargetHeading == 180.0)
+            {
+                if (NormalizedHeading >= 0.0)//
+                {
+                    AdjustedTurningSpeed = 0.06+((AngularDifference*1.5)/1000.0);
+                }
+                else// NormalizedHeading is less than zero i e -179
+                {
+                    AdjustedTurningSpeed = 0.06+(((180+NormalizedHeading)*1.5)/1000.0);
+                }
+
+
+            }
+            AdjustedTurningSpeed = 0.06+((AngularDifference*1.5)/1000.0);
         }
 
-        if (AdjustedTurningSpeed > TurningSpeed)
+        if (AdjustedTurningSpeed >= TurningSpeed)
         {
             AdjustedTurningSpeed = TurningSpeed;
             MaxDrivePowerAchieved = true;
@@ -762,7 +799,7 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
     }
     Boolean DidRoboStoppedtMoving()
     {
-        if ( (velocity.velocX < 0.01) && (velocity.velocY < 0.01) && (velocity.velocZ < 0.01) )
+        if ( (velocity.velocX < 0.02) && (velocity.velocY < 0.02) && (velocity.velocZ < 0.02) )
         {
             MaxDrivePowerAchieved = false;
             TimeElapsed= 0;
@@ -773,7 +810,7 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
 
     Boolean IsIMUDisconnected()
     {
-        if ( (angles.heading == 0) && (angles.roll == 0)  && (angles.pitch == 0)  )
+        if ( (angles.heading == 0.0) && (angles.roll == 0.0)  && (angles.pitch == 0.0)  )
         {
             return true;
         }
@@ -782,7 +819,7 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
     void composeDashboard()
     {
         // The default dashboard update rate is a little to slow for us, so we update faster
-        telemetry.setUpdateIntervalMs(250);
+        telemetry.setUpdateIntervalMs(100);
 
         // At the beginning of each telemetry update, grab a bunch of data
         // from the IMU that we will then display in separate lines.
@@ -1121,8 +1158,12 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
     {
         //0.0237*G6^(-1.164)
         double ExpProduct;
+        double dist;
         ExpProduct = Math.pow(v_sensor_ods_SIDE.getLightDetected(), -0.589);
-        return  (0.2117 *ExpProduct);
+        dist = (0.2117 *ExpProduct);
+        if ((dist <20.0) && (dist >=0.0)) return dist;
+        else return 20.0;
+
     }
 
     double convert_encoder_dat_to_inches (double encoderVal)
@@ -1131,15 +1172,16 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
 
     }
 
-    void Reset_Encoders()
+    void Reset_Encoders()  throws InterruptedException
     {
-        this.backright.setMode(DcMotorController.RunMode.RESET_ENCODERS);
-        this.backleft.setMode(DcMotorController.RunMode.RESET_ENCODERS);
-        this.frontright.setMode(DcMotorController.RunMode.RUN_WITHOUT_ENCODERS);
-        this.backright.setMode(DcMotorController.RunMode.RUN_WITHOUT_ENCODERS);
+        backright.setMode(DcMotorController.RunMode.RESET_ENCODERS);
+        backleft.setMode(DcMotorController.RunMode.RESET_ENCODERS);
+        backright.setMode(DcMotorController.RunMode.RUN_WITHOUT_ENCODERS);
+        backleft.setMode(DcMotorController.RunMode.RUN_WITHOUT_ENCODERS);
+        frontright.setMode(DcMotorController.RunMode.RUN_WITHOUT_ENCODERS);
+        frontleft.setMode(DcMotorController.RunMode.RUN_WITHOUT_ENCODERS);
 
-        this.frontleft.setMode(DcMotorController.RunMode.RUN_WITHOUT_ENCODERS);
-        this.backleft.setMode(DcMotorController.RunMode.RUN_WITHOUT_ENCODERS);
+
     }
 
     void SetServoPositions()
@@ -1236,6 +1278,17 @@ public class WW_Red_allicance_Aut extends SynchronousOpMode
         return AdjustedPitch;
     }
 
-
+    private void delay(int ms)
+    {
+        try
+        {
+            Thread.sleep(ms);
+        }
+        catch (InterruptedException e)
+        {
+            handleCapturedInterrupt(e);
+        }
+    }
 }
+
 
